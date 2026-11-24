@@ -18,7 +18,7 @@ import com.cfsm.monitor.ui.theme.CfsmTheme
 
 @Composable
 fun CfsmApp(vm: MonitorViewModel) {
-    CfsmTheme(themeMode = vm.themeMode) {
+    CfsmTheme(themeMode = vm.themeMode, uiStyle = vm.uiStyle) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,

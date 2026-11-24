@@ -32,6 +32,11 @@ class ConfigStore(context: Context) {
         get() = prefs.getString(KEY_THEME, "auto").orEmpty().ifBlank { "auto" }
         set(value) = prefs.edit().putString(KEY_THEME, value).apply()
 
+    /** 界面风格：classic / glass / bento / cyber */
+    var uiStyle: String
+        get() = prefs.getString(KEY_STYLE, "glass").orEmpty().ifBlank { "glass" }
+        set(value) = prefs.edit().putString(KEY_STYLE, value).apply()
+
     /** 自动轮询间隔（秒），作为 WS 之外的保底；0 表示只依赖实时推送 */
     var refreshSeconds: Int
         get() = prefs.getInt(KEY_REFRESH, 5)
@@ -91,6 +96,7 @@ class ConfigStore(context: Context) {
         const val KEY_PASS = "password"
         const val KEY_JWT = "jwt"
         const val KEY_THEME = "theme_mode"
+        const val KEY_STYLE = "ui_style"
         const val KEY_REFRESH = "refresh_seconds"
         const val KEY_TITLE = "site_title"
     }

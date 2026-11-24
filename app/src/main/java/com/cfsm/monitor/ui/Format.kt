@@ -112,7 +112,7 @@ fun billingCycleLabel(cycle: String): String = when (cycle) {
     else -> ""
 }
 
-/** 只显示国家/地区代码文本，不渲染旗帜。 */
+/** 只显示国家/地区代码文本（如 US / CN / HK）。 */
 fun regionLabel(region: String, fallback: String = ""): String {
     val code = region.trim().uppercase()
     return when {
@@ -122,7 +122,22 @@ fun regionLabel(region: String, fallback: String = ""): String {
     }
 }
 
+/** 由 ISO 3166-1 两位地区码生成旗帜 emoji（无旗帜环境则显示代码文本）。 */
+fun flagEmoji(region: String): String {
+    val code = region.trim().uppercase()
+    if (code.length != 2 || code.any { it !in 'A'..'Z' }) return ""
+    return code.map { String(Character.toChars(0x1F1E6 + (it - 'A'))) }.joinToString("")
+}
+
+/** 系统名去噪：Debian Linux 12 (bookworm) → Debian 12。 */
 fun shortOs(os: String): String {
     if (os.isBlank()) return "未知系统"
-    return os.replace("GNU/Linux", "Linux").trim()
+    var s = os
+        .replace("GNU/Linux", " ")
+        .replace("Linux", " ")
+        .replace(Regex("\\s*\\([^)]*\\)"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+    if (s.isBlank()) s = os.trim()
+    return s
 }

@@ -1,5 +1,10 @@
 package com.cfsm.monitor.ui
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,6 +24,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -31,12 +37,18 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,16 +56,24 @@ import com.cfsm.monitor.MonitorViewModel
 import com.cfsm.monitor.data.ServerInfo
 import com.cfsm.monitor.data.Stats
 import com.cfsm.monitor.data.SysConfig
-import com.cfsm.monitor.ui.components.MetricBar
-import com.cfsm.monitor.ui.components.StatusDot
+import com.cfsm.monitor.ui.components.LatencyBadge
+import com.cfsm.monitor.ui.components.MetricColumn
+import com.cfsm.monitor.ui.components.MetricRing
 import com.cfsm.monitor.ui.components.Pill
+import com.cfsm.monitor.ui.components.Sparkline
+import com.cfsm.monitor.ui.components.StatusDot
+import com.cfsm.monitor.ui.theme.MetricPalette
+import com.cfsm.monitor.ui.theme.UiStyle
 import com.cfsm.monitor.ui.theme.metricPalette
+import com.cfsm.monitor.ui.theme.skin
 
 @Composable
 fun HomeScreen(vm: MonitorViewModel) {
     val servers = vm.servers
     val now = vm.now
     val sys = vm.sysConfig
+    val sk = skin
+    var regionFilter by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         vm.startAutoRefresh()
@@ -63,10 +83,15 @@ fun HomeScreen(vm: MonitorViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
+            .let { base ->
+                if (sk.pageBrush != null) base.background(sk.pageBrush)
+                else base.background(MaterialTheme.colorScheme.background)
+            }
     ) {
         HomeHeader(vm, now)
+
+        RegionFilterBar(servers, regionFilter, onSelect = { regionFilter = it })
 
         if (vm.error != null && servers.isNotEmpty()) {
             ErrorBanner(vm.error.orEmpty(), onRetry = vm::reload, onSetup = vm::goSetup)
@@ -112,18 +137,22 @@ fun HomeScreen(vm: MonitorViewModel) {
                     )
                 }
 
-                else -> LazyColumn(
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.navigationBarsPadding(),
-                ) {
-                    items(items = servers, key = { it.id }) { server ->
-                        ServerCard(
-                            server = server,
-                            sys = sys,
-                            now = now,
-                            onClick = { vm.openDetail(server.id) },
-                        )
+                else -> {
+                    val filtered = if (regionFilter == null) servers else servers.filter { it.region == regionFilter }
+                    LazyColumn(
+                        contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 28.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.navigationBarsPadding(),
+                    ) {
+                        items(items = filtered, key = { it.id }) { server ->
+                            ServerCard(
+                                server = server,
+                                sys = sys,
+                                now = now,
+                                cpuHistory = vm.cpuHistory[server.id].orEmpty(),
+                                onClick = { vm.openDetail(server.id) },
+                            )
+                        }
                     }
                 }
             }
@@ -136,46 +165,59 @@ private fun CenterBox(content: @Composable () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
 }
 
+/** 标题右侧的实时呼吸灯：连接时呼吸闪烁，断开时灰点静止。 */
+@Composable
+private fun BreathingDot(active: Boolean) {
+    val palette = metricPalette
+    val color = if (active) palette.ok else MaterialTheme.colorScheme.outline
+    if (!active) {
+        Box(
+            modifier = Modifier
+                .size(9.dp)
+                .background(color, CircleShape),
+        )
+        return
+    }
+    val transition = rememberInfiniteTransition(label = "breath")
+    val alpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1100), RepeatMode.Reverse),
+        label = "breathAlpha",
+    )
+    Box(
+        modifier = Modifier
+            .size(9.dp)
+            .alpha(alpha)
+            .background(color, CircleShape),
+    )
+}
+
 @Composable
 private fun HomeHeader(vm: MonitorViewModel, now: Long) {
+    val sk = skin
     val palette = metricPalette
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 6.dp)
+            .padding(start = 18.dp, end = 6.dp, top = 8.dp, bottom = 4.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = vm.siteTitle,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(3.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(
-                        color = if (vm.wsConnected) palette.ok else MaterialTheme.colorScheme.outline,
-                        size = 7.dp,
-                    )
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        text = if (vm.wsConnected) "实时" else "离线",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (vm.wsConnected) palette.ok else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = " · 更新于 ${relativeTime(vm.lastSync, now)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            IconButton(onClick = vm::reload) {
+            Text(
+                text = vm.siteTitle,
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.width(8.dp))
+            BreathingDot(active = vm.wsConnected)
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = vm::reload, modifier = Modifier.size(36.dp)) {
                 if (vm.refreshing) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -187,7 +229,7 @@ private fun HomeHeader(vm: MonitorViewModel, now: Long) {
                     )
                 }
             }
-            IconButton(onClick = vm::goSettings) {
+            IconButton(onClick = vm::goSettings, modifier = Modifier.size(36.dp)) {
                 Icon(
                     imageVector = Icons.Filled.Settings,
                     contentDescription = "设置",
@@ -196,71 +238,123 @@ private fun HomeHeader(vm: MonitorViewModel, now: Long) {
             }
         }
 
-        Spacer(Modifier.height(10.dp))
-        StatsRow(vm.stats)
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
+        CapsuleBar(vm.stats, palette)
     }
 }
 
+/** 紧凑悬浮数据胶囊条：在线 / 总下行 / 总上行合并为一条。 */
 @Composable
-private fun StatsRow(stats: Stats) {
-    val palette = metricPalette
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        StatCell(
-            label = "在线",
-            value = "${stats.online}/${stats.total}",
-            valueColor = if (stats.offline > 0) palette.warn else palette.ok,
-            modifier = Modifier.weight(1f),
-        )
-        StatCell(
-            label = "总下行",
-            value = formatSpeed(stats.speedIn),
-            valueColor = palette.netIn,
-            modifier = Modifier.weight(1f),
-        )
-        StatCell(
-            label = "总上行",
-            value = formatSpeed(stats.speedOut),
-            valueColor = palette.netOut,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun StatCell(
-    label: String,
-    value: String,
-    valueColor: Color,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .border(
-                1.dp,
-                MaterialTheme.colorScheme.outline.copy(alpha = 0.7f),
-                RoundedCornerShape(12.dp),
-            )
-            .padding(horizontal = 10.dp, vertical = 8.dp)
+private fun CapsuleBar(stats: Stats, palette: MetricPalette) {
+    val sk = skin
+    val shape = RoundedCornerShape(999.dp)
+    Row(
+        modifier = Modifier
+            .clip(shape)
+            .background(sk.capsuleBg)
+            .border(1.dp, sk.capsuleBorder, shape)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = label,
+            text = "在线 ",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.height(2.dp))
         Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall.copy(
+            text = "${stats.online}/${stats.total}",
+            style = MaterialTheme.typography.labelSmall.copy(
                 fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Medium,
-                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
             ),
-            color = valueColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            color = if (stats.offline > 0) palette.warn else palette.ok,
+        )
+        CapsuleDivider()
+        Text(
+            text = "↓ ",
+            style = MaterialTheme.typography.labelSmall,
+            color = palette.netIn,
+        )
+        Text(
+            text = formatSpeed(stats.speedIn),
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        CapsuleDivider()
+        Text(
+            text = "↑ ",
+            style = MaterialTheme.typography.labelSmall,
+            color = palette.netOut,
+        )
+        Text(
+            text = formatSpeed(stats.speedOut),
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun CapsuleDivider() {
+    Spacer(Modifier.width(9.dp))
+    Text(
+        text = "·",
+        style = MaterialTheme.typography.labelSmall,
+        color = skin.meta,
+    )
+    Spacer(Modifier.width(9.dp))
+}
+
+/** 地区分类筛选条：全部 / US / CN / HK，带旗帜与数量。 */
+@Composable
+private fun RegionFilterBar(
+    servers: List<ServerInfo>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+) {
+    val counts = LinkedHashMap<String, Int>()
+    servers.forEach { s ->
+        val region = s.region.trim().uppercase()
+        if (region.isNotBlank()) counts.merge(region, 1, Int::plus)
+    }
+    if (counts.size < 2) return
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 4.dp),
+    ) {
+        RegionChip(text = "全部 ${servers.size}", selected = selected == null) { onSelect(null) }
+        counts.entries
+            .sortedByDescending { it.value }
+            .forEach { (region, count) ->
+                RegionChip(text = "${flagEmoji(region)} ${regionLabel(region)} $count", selected = selected == region) {
+                    onSelect(region)
+                }
+            }
+    }
+}
+
+@Composable
+private fun RegionChip(text: String, selected: Boolean, onClick: () -> Unit) {
+    val sk = skin
+    val shape = RoundedCornerShape(999.dp)
+    val bg = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else sk.capsuleBg
+    val border = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f) else sk.capsuleBorder
+    val textColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        modifier = Modifier
+            .clip(shape)
+            .background(bg)
+            .border(1.dp, border, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = textColor,
         )
     }
 }
@@ -298,27 +392,39 @@ fun ServerCard(
     server: ServerInfo,
     sys: SysConfig,
     now: Long,
+    cpuHistory: List<Float>,
     onClick: () -> Unit,
 ) {
     val palette = metricPalette
+    val sk = skin
+    val style = sk.style
     val online = server.isOnlineAt(now)
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(18.dp)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.7f), shape)
+            .background(sk.cardBg)
+            .border(1.dp, sk.cardBorder, shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp)
     ) {
+        // ---- 头部：状态点 + 国旗 + 名称 + IP 版本徽章 + 到期倒计时 ----
         Row(verticalAlignment = Alignment.CenterVertically) {
             StatusDot(
                 color = if (online) palette.ok else MaterialTheme.colorScheme.outline,
                 size = 9.dp,
             )
             Spacer(Modifier.width(8.dp))
+            val flag = flagEmoji(server.region)
+            if (flag.isNotBlank()) {
+                Text(
+                    text = flag,
+                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp),
+                )
+                Spacer(Modifier.width(6.dp))
+            }
             Text(
                 text = server.name.ifBlank { "未命名" },
                 style = MaterialTheme.typography.titleMedium,
@@ -327,60 +433,62 @@ fun ServerCard(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            if (server.region.isNotBlank()) {
+            val ipBadge = when {
+                server.ipv4 && server.ipv6 -> "IPv4/6"
+                server.ipv4 -> "IPv4"
+                server.ipv6 -> "IPv6"
+                else -> ""
+            }
+            if (ipBadge.isNotBlank()) {
+                Spacer(Modifier.width(6.dp))
+                Pill(text = ipBadge, color = MaterialTheme.colorScheme.primary)
+            }
+            val dueDays = if (sys.showExpire && server.expireDate.isNotBlank()) {
+                daysUntil(server.expireDate)
+            } else {
+                null
+            }
+            if (dueDays != null && dueDays in 0..15) {
                 Spacer(Modifier.width(6.dp))
                 Pill(
-                    text = regionLabel(server.region),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = "剩 $dueDays 天",
+                    color = if (dueDays <= 7) palette.bad else palette.warn,
                 )
             }
             Spacer(Modifier.weight(1f))
-            Text(
-                text = relativeTime(server.lastUpdated, now),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (!online) {
+                Text(
+                    text = "离线",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = palette.bad,
+                )
+            }
         }
 
-        val subtitle = buildSubtitle(server)
+        // ---- 去噪副标题：系统 · 核数 · 开机时间 · 价格 · 到期 ----
+        val subtitle = buildSubtitleCompact(server, sys, now)
         if (subtitle.isNotBlank()) {
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                color = sk.meta,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
 
-        Spacer(Modifier.height(11.dp))
-        MetricBar(
-            label = "CPU",
-            value = formatPercent(server.cpuPercent),
-            percent = server.cpuPercent,
-            color = palette.cpu,
-            dimmed = !online,
-        )
-        Spacer(Modifier.height(7.dp))
-        MetricBar(
-            label = "内存",
-            value = formatUsage(server.ramUsed * MB, server.ramTotal * MB),
-            percent = server.ramPercent,
-            color = palette.ram,
-            dimmed = !online,
-        )
-        Spacer(Modifier.height(7.dp))
-        MetricBar(
-            label = "磁盘",
-            value = formatUsage(server.diskUsed * MB, server.diskTotal * MB),
-            percent = server.diskPercent,
-            color = palette.disk,
-            dimmed = !online,
-        )
+        Spacer(Modifier.height(10.dp))
 
-        Spacer(Modifier.height(11.dp))
+        // ---- 指标区：Bento 环形 / 三栏细条（终端风带 Sparkline）----
+        when (style) {
+            UiStyle.BENTO -> MetricsRingRow(server, online)
+            else -> MetricsGridColumn(server, online, style == UiStyle.CYBER, cpuHistory)
+        }
 
+        Spacer(Modifier.height(10.dp))
+
+        // ---- 网速行 ----
         Row(verticalAlignment = Alignment.CenterVertically) {
             SpeedLabel("↓", formatSpeed(server.netInSpeed), palette.netIn)
             Spacer(Modifier.width(12.dp))
@@ -390,70 +498,154 @@ fun ServerCard(
                 Text(
                     text = "月流量 " + formatBytes(server.monthlyTotal),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = sk.meta,
                     maxLines = 1,
                 )
             }
         }
 
+        // ---- 三网延迟胶囊 ----
         if (server.hasLatency) {
-            Spacer(Modifier.height(9.dp))
+            Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                LatencyInline("电信", server.pingCt, palette)
-                LatencyInline("联通", server.pingCu, palette)
-                LatencyInline("移动", server.pingCm, palette)
-                LatencyInline("BGP", server.pingBd, palette)
+                LatencyBadge("电信", server.pingCt, Modifier.weight(1f))
+                LatencyBadge("联通", server.pingCu, Modifier.weight(1f))
+                LatencyBadge("移动", server.pingCm, Modifier.weight(1f))
+                LatencyBadge("BGP", server.pingBd, Modifier.weight(1f))
             }
         }
 
-        val footer = buildFooter(server, sys)
-        if (footer.isNotBlank()) {
-            Spacer(Modifier.height(9.dp))
-            Text(
-                text = footer,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }
 
-
-private fun buildSubtitle(server: ServerInfo): String {
-    val parts = ArrayList<String>(4)
-    if (server.os.isNotBlank()) parts.add(shortOs(server.os))
-    if (server.arch.isNotBlank()) parts.add(server.arch)
-    val cores = server.cpuCores
-    if (cores != null && cores > 0) parts.add("${cores.toInt()} 核")
-    if (server.loadAvg.isNotBlank()) parts.add("负载 " + server.loadAvg)
-    return parts.joinToString(" · ")
+/** 三栏网格指标：CPU / 内存 / 磁盘并排，卡片高度砍半。 */
+@Composable
+private fun MetricsGridColumn(server: ServerInfo, online: Boolean, cyber: Boolean, cpuHistory: List<Float>) {
+    val palette = metricPalette
+    val accentStyle = skin.style == UiStyle.GLASS || cyber
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        MetricColumn(
+            label = "CPU",
+            percentText = formatPercent(server.cpuPercent),
+            percent = server.cpuPercent,
+            color = palette.cpu,
+            modifier = Modifier.weight(1f),
+            extraText = loadTriple(server.loadAvg),
+            warn = accentStyle && server.cpuPercent > 80f,
+            dimmed = !online,
+        )
+        MetricColumn(
+            label = "内存",
+            percentText = formatPercent(server.ramPercent),
+            percent = server.ramPercent,
+            color = palette.ram,
+            modifier = Modifier.weight(1f),
+            capacityText = formatUsage(server.ramUsed * MB, server.ramTotal * MB),
+            warn = accentStyle && server.ramPercent > 80f,
+            dimmed = !online,
+        )
+        MetricColumn(
+            label = "磁盘",
+            percentText = formatPercent(server.diskPercent),
+            percent = server.diskPercent,
+            color = palette.disk,
+            modifier = Modifier.weight(1f),
+            capacityText = formatUsage(server.diskUsed * MB, server.diskTotal * MB),
+            warn = accentStyle && server.diskPercent > 80f,
+            dimmed = !online,
+        )
+    }
+    if (cyber && cpuHistory.isNotEmpty()) {
+        Spacer(Modifier.height(4.dp))
+        Sparkline(
+            values = cpuHistory,
+            color = if (server.cpuPercent > 80f) palette.warn else palette.cpu,
+            dimmed = !online,
+        )
+    }
 }
 
-private fun buildFooter(server: ServerInfo, sys: SysConfig): String {
-    val parts = ArrayList<String>(3)
-    if (sys.showPrice && server.price.isNotBlank()) {
-        val cycle = billingCycleLabel(server.billingCycle)
-        parts.add(server.currency + server.price + if (cycle.isNotBlank()) "/$cycle" else "")
+/** Bento 风格：三列环形图。 */
+@Composable
+private fun MetricsRingRow(server: ServerInfo, online: Boolean) {
+    val palette = metricPalette
+    val sk = skin
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        RingCell(
+            label = "CPU",
+            percent = server.cpuPercent,
+            value = formatPercent(server.cpuPercent),
+            capacity = loadTriple(server.loadAvg).ifBlank { "负载 --" },
+            color = palette.cpu,
+            online = online,
+            modifier = Modifier.weight(1f),
+        )
+        RingCell(
+            label = "内存",
+            percent = server.ramPercent,
+            value = formatPercent(server.ramPercent),
+            capacity = formatUsage(server.ramUsed * MB, server.ramTotal * MB),
+            color = palette.ram,
+            online = online,
+            modifier = Modifier.weight(1f),
+        )
+        RingCell(
+            label = "磁盘",
+            percent = server.diskPercent,
+            value = formatPercent(server.diskPercent),
+            capacity = formatUsage(server.diskUsed * MB, server.diskTotal * MB),
+            color = palette.disk,
+            online = online,
+            modifier = Modifier.weight(1f),
+        )
     }
-    if (sys.showExpire && server.expireDate.isNotBlank()) {
-        val days = daysUntil(server.expireDate)
-        val suffix = when {
-            days == null -> ""
-            days < 0 -> "（已过期）"
-            days <= 15 -> "（剩 $days 天）"
-            else -> ""
-        }
-        parts.add("到期 ${server.expireDate}$suffix")
+    // 消除未使用警告：环形风格下卡片底色直接来自 skin。
+    @Suppress("UNUSED_EXPRESSION") sk
+}
+
+@Composable
+private fun RingCell(
+    label: String,
+    percent: Float,
+    value: String,
+    capacity: String,
+    color: Color,
+    online: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val sk = skin
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        MetricRing(
+            percent = percent,
+            label = "",
+            value = value,
+            color = color,
+            size = 52.dp,
+            strokeWidth = 6.dp,
+            dimmed = !online,
+            compact = true,
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+            color = sk.meta,
+        )
+        Text(
+            text = capacity,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.sp,
+            ),
+            color = sk.footer,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
     }
-    if (server.trafficLimit.isNotBlank() && sys.showTraffic) {
-        parts.add("限额 ${server.trafficLimit}")
-    }
-    return parts.joinToString("  ·  ")
 }
 
 @Composable
@@ -474,33 +666,40 @@ private fun SpeedLabel(arrow: String, text: String, color: Color) {
     }
 }
 
-@Composable
-private fun LatencyInline(label: String, latency: com.cfsm.monitor.data.Latency?, palette: com.cfsm.monitor.ui.theme.MetricPalette) {
-    val color = when {
-        latency == null -> MaterialTheme.colorScheme.outline
-        latency.timeout || latency.isBad -> palette.bad
-        latency.isWarn -> palette.warn
-        else -> palette.ok
+/** 1/5/15 分钟负载三元组，数据缺失返回空串。 */
+private fun loadTriple(loadAvg: String): String {
+    val parts = loadAvg.trim().split(Regex("\\s+")).filter { it.isNotBlank() && it != "-" }
+    return parts.joinToString(" ")
+}
+
+/** 第二行：系统简称 · 核数 · 开机时长 · 价格 · 到期日期（不带文字标签）。 */
+private fun buildSubtitleCompact(server: ServerInfo, sys: SysConfig, now: Long): String {
+    val parts = ArrayList<String>(5)
+    if (server.os.isNotBlank()) parts.add(shortOs(server.os))
+    val cores = server.cpuCores
+    if (cores != null && cores > 0) parts.add("${cores.toInt()}C")
+    val up = shortUptime(server.bootTime, now)
+    if (up.isNotBlank()) parts.add(up)
+    if (sys.showPrice && server.price.isNotBlank()) {
+        val cycle = billingCycleLabel(server.billingCycle)
+        parts.add(server.currency + server.price + if (cycle.isNotBlank()) "/$cycle" else "")
     }
-    val text = when {
-        latency == null -> "—"
-        latency.timeout -> "超时"
-        else -> "${latency.ms.toInt()}"
+    if (sys.showExpire && server.expireDate.isNotBlank()) {
+        parts.add(server.expireDate)
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.width(3.dp))
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontFamily = FontFamily.Monospace,
-                fontSize = 10.sp,
-            ),
-            color = color,
-        )
+    return parts.joinToString(" · ")
+}
+
+/** 开机时长的紧凑写法：25 天 / 8 小时 / 12 分。 */
+private fun shortUptime(bootTime: Long, now: Long): String {
+    if (bootTime <= 0L) return ""
+    val total = (now - bootTime) / 1000L
+    if (total <= 0L) return ""
+    val days = total / 86_400
+    val hours = (total % 86_400) / 3600
+    return when {
+        days > 0 -> "$days 天"
+        hours > 0 -> "$hours 小时"
+        else -> "${total / 60} 分"
     }
 }

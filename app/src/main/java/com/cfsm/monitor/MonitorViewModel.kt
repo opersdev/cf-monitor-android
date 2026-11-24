@@ -19,6 +19,9 @@ import com.cfsm.monitor.data.Stats
 import com.cfsm.monitor.data.SysConfig
 import com.cfsm.monitor.data.normalizeBaseUrl
 import com.cfsm.monitor.data.parseServer
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.snapshots.SnapshotStateMap
+import com.cfsm.monitor.ui.theme.UiStyle
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -82,6 +85,13 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var themeMode: String by mutableStateOf(store.themeMode)
         private set
+
+    /** 界面风格（毛玻璃 / Bento / 终端 / 经典），设置页可切换，即时生效。 */
+    var uiStyle: UiStyle by mutableStateOf(UiStyle.from(store.uiStyle))
+        private set
+
+    /** 每台服务器最近若干个 CPU 采样点，供终端风 Sparkline 展示趋势。 */
+    val cpuHistory: SnapshotStateMap<String, List<Float>> = mutableStateMapOf()
     var refreshSeconds: Int by mutableStateOf(store.refreshSeconds)
         private set
     var now: Long by mutableStateOf(System.currentTimeMillis())
@@ -298,9 +308,20 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         val copy = servers.toMutableList()
         copy[index] = merged
         servers = copy
+        // 记录 CPU 采样轨迹（终端风 Sparkline 用），窗口 40 个点。
+        recordCpuSample(serverId, merged.cpuPercent)
         // WS 已经带来了新指标，同步刷新同步时间与首页汇总。
         lastSync = System.currentTimeMillis()
         recomputeStats()
+    }
+
+    private fun recordCpuSample(serverId: String, cpuPercent: Float) {
+        if (cpuPercent.isNaN()) return
+        val window = 40
+        val next = cpuHistory[serverId].orEmpty().toMutableList()
+        next.add(cpuPercent)
+        while (next.size > window) next.removeAt(0)
+        cpuHistory[serverId] = next
     }
 
     /**
@@ -481,6 +502,11 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
     fun setTheme(mode: String) {
         themeMode = mode
         store.themeMode = mode
+    }
+
+    fun applyUiStyle(style: UiStyle) {
+        uiStyle = style
+        store.uiStyle = style.id
     }
 
     fun setRefreshInterval(seconds: Int) {

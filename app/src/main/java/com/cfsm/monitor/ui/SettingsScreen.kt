@@ -35,6 +35,7 @@ import com.cfsm.monitor.BuildConfig
 import com.cfsm.monitor.MonitorViewModel
 import com.cfsm.monitor.ui.components.KeyValueRow
 import com.cfsm.monitor.ui.components.SectionCard
+import com.cfsm.monitor.ui.theme.UiStyle
 import com.cfsm.monitor.ui.theme.metricPalette
 
 @Composable
@@ -94,6 +95,37 @@ fun SettingsScreen(vm: MonitorViewModel) {
                     ActionChip(text = "修改连接", onClick = vm::goSetup)
                     ActionChip(text = "立即刷新", onClick = vm::reload)
                 }
+            }
+
+            SectionCard(title = "界面风格") {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OptionChip(
+                        text = "毛玻璃",
+                        selected = vm.uiStyle == UiStyle.GLASS,
+                        onClick = { vm.applyUiStyle(UiStyle.GLASS) },
+                    )
+                    OptionChip(
+                        text = "Bento",
+                        selected = vm.uiStyle == UiStyle.BENTO,
+                        onClick = { vm.applyUiStyle(UiStyle.BENTO) },
+                    )
+                    OptionChip(
+                        text = "终端",
+                        selected = vm.uiStyle == UiStyle.CYBER,
+                        onClick = { vm.applyUiStyle(UiStyle.CYBER) },
+                    )
+                    OptionChip(
+                        text = "经典",
+                        selected = vm.uiStyle == UiStyle.CLASSIC,
+                        onClick = { vm.applyUiStyle(UiStyle.CLASSIC) },
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "毛玻璃 / 终端为深色，Bento 为浅色；「经典」的明暗跟随下方外观设置。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             SectionCard(title = "外观") {
